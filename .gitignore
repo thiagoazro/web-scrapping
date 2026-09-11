@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+
+# nunca versionar cofres nem peças reais
+cofre*.json
+*_anon.txt
+relatorio*.json

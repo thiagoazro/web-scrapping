@@ -1,0 +1,8 @@
+# O núcleo do sistema (detecção determinística, cofre, auditoria, CLI) roda
+# apenas com a biblioteca padrão do Python 3.10+. Nada aqui é obrigatório.
+
+# Camada semântica (Agente 1 e Agente 2 com Claude) — opcional:
+anthropic>=1.0.0
+
+# Cofre cifrado com senha (`--senha`) — opcional:
+cryptography>=42.0.0
