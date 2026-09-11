@@ -120,9 +120,14 @@ class AgenteAuditor:
             verificacoes["confronto"] = "não executada (texto original não fornecido)"
             verificacoes["integridade"] = "não executada (texto original não fornecido)"
 
-        # 3. segurança do próprio documento (roda sempre, com ou sem LLM)
-        seguranca = defesas.detectar(texto_original if texto_original is not None
-                                     else texto_anonimizado)
+        # 3. segurança do documento (roda sempre, com ou sem LLM). Varre o
+        # original e também a saída: é a saída que segue para o próximo
+        # sistema, e o texto de injeção sobrevive à anonimização — ele não é
+        # dado pessoal, então nada o remove.
+        seguranca = self._deduplicar(
+            defesas.detectar(texto_anonimizado)
+            + (defesas.detectar(texto_original) if texto_original else [])
+        )
         achados.extend(seguranca)
         verificacoes["injecao"] = f"{len(seguranca)} achado(s)"
 
@@ -434,6 +439,14 @@ class AgenteAuditor:
             recomendacoes.append(
                 "Regenere o cofre a partir do documento original antes de "
                 "distribuir o texto anonimizado."
+            )
+        if any(a.categoria == "tentativa_de_injecao" for a in achados):
+            recomendacoes.append(
+                "QUARENTENA: este documento contém texto dirigido a sistemas "
+                "de IA. Os dados pessoais foram removidos normalmente, mas "
+                "não encaminhe o arquivo a outro sistema (resumidor, "
+                "buscador, assistente de minuta) antes de um humano ler os "
+                "trechos apontados."
             )
         if not achados:
             recomendacoes.append(

@@ -67,6 +67,21 @@
   table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
   th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--borda)}
   th{color:var(--suave);font-weight:600}
+  .quarentena{
+    border:2px solid var(--alerta);background:var(--alerta-claro);
+    border-radius:10px;padding:16px 18px;margin-bottom:16px;
+  }
+  .quarentena h4{margin:0 0 6px;font-size:15px;color:var(--alerta);
+    display:flex;gap:8px;align-items:center}
+  .quarentena h4 .icone{font-size:19px;line-height:1}
+  .quarentena p{margin:0 0 10px;font-size:13.5px}
+  .quarentena ul{list-style:none;padding:0;margin:0 0 10px;font-size:13px}
+  .quarentena li{background:var(--papel);border-radius:6px;padding:7px 10px;
+    margin-bottom:5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    word-break:break-word}
+  .quarentena li b{font-family:inherit;color:var(--alerta)}
+  .quarentena .acao{font-size:13.5px;font-weight:600;margin:0}
+  .selo.quarentena-selo{background:var(--alerta);color:#fff}
   .achado{border-left:3px solid var(--alerta);padding:6px 10px;margin:6px 0;
     background:var(--alerta-claro);border-radius:0 6px 6px 0;font-size:13px}
   .achado.media{border-color:var(--atencao);background:var(--atencao-claro)}
@@ -256,6 +271,20 @@ function desenhar(dados, comTexto){
     const anon = d.relatorio.anonimizacao;
     const selo = d.aprovado ? `<span class="selo ok">aprovado</span>`
                             : `<span class="selo mau">reprovado</span>`;
+    const alertas = parecer.alertas_de_seguranca || [];
+    const quarentena = alertas.length ? `
+      <div class="quarentena">
+        <h4><span class="icone">⚠</span> Quarentena — tentativa de injeção de prompt</h4>
+        <p>Este documento contém ${alertas.length} trecho(s) com forma de
+           instrução dirigida a sistemas de IA. Eles foram tratados como dado,
+           nunca como comando, e os dados pessoais foram removidos
+           normalmente.</p>
+        <ul>${alertas.map(a => `<li><b>${a.gravidade.toUpperCase()} · ${a.tipo}</b><br>
+             ${escapar(a.trecho || a.descricao)}</li>`).join("")}</ul>
+        <p class="acao">Não encaminhe este arquivo a outro sistema de IA
+           (resumidor, buscador, assistente de minuta) antes de alguém ler os
+           trechos acima.</p>
+      </div>` : "";
     const tipos = anon ? Object.entries(anon.total_por_tipo)
       .map(([t,n]) => `<tr><td>${t}</td><td>${n}</td></tr>`).join("") : "";
     const achados = parecer.achados.map(a =>
@@ -268,12 +297,14 @@ function desenhar(dados, comTexto){
     return `<div class="cartao doc">
       <div class="barra">
         <h3>${escapar(d.nome)} ${selo}
-          <span class="selo neutro">risco ${d.nota_risco}/100</span></h3>
+          <span class="selo neutro">risco ${d.nota_risco}/100</span>
+          ${alertas.length ? `<span class="selo quarentena-selo">quarentena</span>` : ""}</h3>
         ${comTexto ? `<div class="linha" style="margin:0">
           <button class="secundario" data-baixar="${i}">Baixar .txt</button>
           <button class="secundario" data-relatorio="${i}">Baixar relatório</button>
         </div>` : ""}
       </div>
+      ${quarentena}
       ${comTexto ? `<pre id="texto-${i}">${destacar(d.texto_anonimizado)}</pre>` : ""}
       <table>
         <tr><th>verificação</th><th>resultado</th></tr>${verificacoes}

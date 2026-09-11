@@ -144,10 +144,15 @@ class Achado:
     trecho: str = ""
     posicao: Optional[int] = None
     origem: str = "regra"
+    #: Achado de dado pessoal tem o trecho mascarado no relatório — denunciar
+    #: um CPF repetindo o CPF seria absurdo. Já um texto de injeção precisa
+    #: aparecer inteiro: quem revisa tem de ler o que o atacante escreveu.
+    sigiloso: bool = True
 
     def para_dict(self) -> Dict[str, Any]:
         d = asdict(self)
-        d["trecho"] = mascarar_para_relatorio(self.trecho)
+        if self.sigiloso:
+            d["trecho"] = mascarar_para_relatorio(self.trecho)
         return d
 
 
@@ -192,6 +197,17 @@ class Parecer:
     def achados_bloqueantes(self) -> List[Achado]:
         return [a for a in self.achados if a.gravidade in (CRITICA, ALTA)]
 
+    @property
+    def alertas_de_seguranca(self) -> List[Achado]:
+        """Tentativas de manipular sistemas de IA encontradas no documento."""
+        return [a for a in self.achados if a.categoria == "tentativa_de_injecao"]
+
+    @property
+    def quarentena(self) -> bool:
+        """Verdadeiro quando o documento não deve seguir para outro sistema de
+        IA sem revisão humana."""
+        return bool(self.alertas_de_seguranca)
+
     def para_dict(self) -> Dict[str, Any]:
         return {
             "aprovado": self.aprovado,
@@ -201,6 +217,11 @@ class Parecer:
             "total_achados": len(self.achados),
             "achados": [a.para_dict() for a in self.achados],
             "recomendacoes": self.recomendacoes,
+            # Campo de primeiro nível: quem integra não precisa vasculhar a
+            # lista de achados para saber que o documento está em quarentena.
+            "quarentena": self.quarentena,
+            "alertas_de_seguranca": [a.para_dict()
+                                     for a in self.alertas_de_seguranca],
         }
 
 
@@ -217,9 +238,14 @@ class ResultadoPipeline:
     def aprovado(self) -> bool:
         return self.parecer.aprovado
 
+    @property
+    def quarentena(self) -> bool:
+        return self.parecer.quarentena
+
     def para_dict(self) -> Dict[str, Any]:
         return {
             "aprovado": self.aprovado,
+            "quarentena": self.quarentena,
             "rodadas": self.rodadas,
             "anonimizacao": self.anonimizacao.para_dict(),
             "parecer": self.parecer.para_dict(),

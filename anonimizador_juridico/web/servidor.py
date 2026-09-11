@@ -237,6 +237,9 @@ class Manipulador(BaseHTTPRequestHandler):
             registro = {
                 "nome": nome,
                 "aprovado": resultado.aprovado,
+                # Integração não deveria ter de vasculhar achados para saber
+                # que o arquivo não pode seguir adiante.
+                "quarentena": resultado.quarentena,
                 "nota_risco": resultado.parecer.nota_risco,
                 "rodadas": resultado.rodadas,
                 "caracteres": len(texto),
@@ -276,6 +279,7 @@ class Manipulador(BaseHTTPRequestHandler):
             parecer = auditor.auditar(texto,
                                       cofre=sessao.cofre if sessao else None)
             saida.append({"nome": nome, "aprovado": parecer.aprovado,
+                          "quarentena": parecer.quarentena,
                           "nota_risco": parecer.nota_risco,
                           "relatorio": {"parecer": parecer.para_dict()}})
         self._responder({"documentos": saida, "perfil": perfil.para_dict()})

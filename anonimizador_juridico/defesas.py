@@ -157,10 +157,18 @@ def detectar(texto: str) -> List[T.Achado]:
                 "escondida — foram removidos antes de qualquer envio ao modelo."
             ),
             origem="regra",
+            sigiloso=False,
         ))
 
     for nome, regex, gravidade in _COMPILADOS:
         for m in regex.finditer(texto):
+            # Mostra a frase, não só o gatilho: quem revisa precisa de contexto
+            # suficiente para decidir se é ataque ou coincidência de redação.
+            janela = " ".join(
+                texto[max(0, m.start() - 25): m.end() + 95].split()
+            )
+            if m.start() > 25:
+                janela = "…" + janela
             achados.append(T.Achado(
                 categoria="tentativa_de_injecao",
                 tipo=nome.upper(),
@@ -171,9 +179,10 @@ def detectar(texto: str) -> List[T.Achado]:
                     "tratado como dado, nunca como comando; confira o trecho "
                     "antes de encaminhar este arquivo a outro sistema."
                 ),
-                trecho=m.group(0)[:120],
+                trecho=janela[:160],
                 posicao=m.start(),
                 origem="regra",
+                sigiloso=False,   # quem revisa precisa ler o texto injetado
             ))
             break  # um achado por padrão basta para acionar a revisão humana
     return achados
