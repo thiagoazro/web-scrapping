@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anonimizador de peças judiciais</title>
+<style>
+  :root{
+    --fundo:#f6f7f9; --papel:#fff; --borda:#dfe3e8; --texto:#1c2430;
+    --suave:#5c6b7a; --acento:#1f5f8b; --acento-claro:#e8f1f7;
+    --ok:#1b7f4d; --ok-claro:#e6f4ec; --alerta:#b3261e; --alerta-claro:#fdecea;
+    --atencao:#8a6100; --atencao-claro:#fdf3e2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --fundo:#12161b; --papel:#1a2027; --borda:#2b343e; --texto:#e6ebf1;
+      --suave:#9aa8b6; --acento:#68b0e0; --acento-claro:#17303f;
+      --ok:#59c98c; --ok-claro:#12291e; --alerta:#ff8a80; --alerta-claro:#2c1614;
+      --atencao:#e2b25a; --atencao-claro:#2b2213; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--texto);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  header{background:var(--papel);border-bottom:1px solid var(--borda);padding:18px 24px}
+  header h1{margin:0;font-size:19px;letter-spacing:-.2px}
+  header p{margin:4px 0 0;color:var(--suave);font-size:13px}
+  main{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+  .cartao{background:var(--papel);border:1px solid var(--borda);border-radius:10px;
+    padding:18px;margin-bottom:18px}
+  h2{font-size:14px;text-transform:uppercase;letter-spacing:.7px;color:var(--suave);
+    margin:0 0 12px}
+  .perfis{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+  .perfil{border:1.5px solid var(--borda);border-radius:8px;padding:12px;cursor:pointer;
+    transition:.12s}
+  .perfil:hover{border-color:var(--acento)}
+  .perfil.ativo{border-color:var(--acento);background:var(--acento-claro)}
+  .perfil b{display:block;font-size:14px;margin-bottom:4px}
+  .perfil span{font-size:12.5px;color:var(--suave)}
+  #zona{border:2px dashed var(--borda);border-radius:10px;padding:26px;text-align:center;
+    cursor:pointer;color:var(--suave);transition:.12s}
+  #zona.sobre{border-color:var(--acento);background:var(--acento-claro);color:var(--acento)}
+  textarea{width:100%;min-height:120px;padding:11px;border:1px solid var(--borda);
+    border-radius:8px;background:var(--fundo);color:var(--texto);font-family:inherit;
+    font-size:14px;resize:vertical}
+  .linha{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  button{background:var(--acento);color:#fff;border:0;border-radius:8px;
+    padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer}
+  button.secundario{background:transparent;color:var(--acento);
+    border:1.5px solid var(--borda)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  label.caixa{display:flex;gap:7px;align-items:center;font-size:13.5px;color:var(--suave)}
+  .aviso{font-size:12.5px;color:var(--suave);margin-top:10px}
+  ul.arquivos{list-style:none;padding:0;margin:12px 0 0;font-size:13.5px}
+  ul.arquivos li{display:flex;justify-content:space-between;padding:6px 10px;
+    background:var(--fundo);border-radius:6px;margin-bottom:5px}
+  ul.arquivos button{background:none;color:var(--alerta);padding:0 4px;font-size:16px}
+  .selo{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;
+    font-weight:700}
+  .selo.ok{background:var(--ok-claro);color:var(--ok)}
+  .selo.mau{background:var(--alerta-claro);color:var(--alerta)}
+  .selo.neutro{background:var(--acento-claro);color:var(--acento)}
+  .doc h3{margin:0;font-size:15px;display:flex;gap:10px;align-items:center}
+  pre{background:var(--fundo);border:1px solid var(--borda);border-radius:8px;
+    padding:12px;max-height:340px;overflow:auto;white-space:pre-wrap;
+    font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  mark{background:var(--acento-claro);color:var(--acento);font-weight:600;
+    padding:0 2px;border-radius:3px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--borda)}
+  th{color:var(--suave);font-weight:600}
+  .achado{border-left:3px solid var(--alerta);padding:6px 10px;margin:6px 0;
+    background:var(--alerta-claro);border-radius:0 6px 6px 0;font-size:13px}
+  .achado.media{border-color:var(--atencao);background:var(--atencao-claro)}
+  .achado.baixa{border-color:var(--suave);background:var(--fundo)}
+  .estado{font-size:13px;color:var(--suave)}
+  .barra{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    justify-content:space-between}
+  .oculto{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Anonimizador de peças judiciais</h1>
+  <p>Dois agentes: um anonimiza, outro audita de forma independente. Nada sai
+     desta máquina, exceto se você ligar a camada semântica.</p>
+</header>
+
+<main>
+  <div class="cartao">
+    <h2>1. Perfil</h2>
+    <div class="perfis" id="perfis"></div>
+  </div>
+
+  <div class="cartao">
+    <h2>2. Documentos</h2>
+    <div id="zona">
+      <b>Arraste os arquivos aqui</b> ou clique para escolher<br>
+      <span id="formatos" class="estado"></span>
+    </div>
+    <input type="file" id="arquivo" multiple class="oculto">
+    <ul class="arquivos" id="lista"></ul>
+    <div style="margin-top:14px">
+      <textarea id="texto" placeholder="…ou cole o texto da peça aqui."></textarea>
+    </div>
+    <div class="linha">
+      <button id="anonimizar">Anonimizar e auditar</button>
+      <button id="auditar" class="secundario">Só auditar (texto já anonimizado)</button>
+      <label class="caixa"><input type="checkbox" id="llm"> camada semântica (Claude)</label>
+      <span id="estado-llm" class="estado"></span>
+    </div>
+    <p class="aviso" id="erro" style="color:var(--alerta)"></p>
+  </div>
+
+  <div class="cartao oculto" id="painel-sessao">
+    <div class="barra">
+      <div>
+        <h2 style="margin:0">Sessão</h2>
+        <span class="estado" id="resumo-sessao"></span>
+      </div>
+      <div class="linha" style="margin:0">
+        <button class="secundario" id="baixar-cofre">Baixar cofre</button>
+        <button class="secundario" id="reidentificar">Reidentificar</button>
+        <button class="secundario" id="encerrar">Encerrar e apagar cofre</button>
+      </div>
+    </div>
+    <p class="aviso">O cofre é o mapa de volta aos dados reais. Ele vive apenas
+      na memória deste servidor: encerrar a sessão torna os textos anonimizados
+      irreversíveis. Se for guardar, guarde longe da peça e com acesso
+      registrado.</p>
+  </div>
+
+  <div id="resultados"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let perfilAtivo = "padrao", arquivos = [], sessao = null;
+
+async function api(rota, corpo){
+  const r = await fetch(rota, corpo ? {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(corpo)
+  } : {});
+  const dados = await r.json();
+  if(!r.ok) throw new Error(dados.erro || ("erro " + r.status));
+  return dados;
+}
+
+function escapar(t){
+  return t.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+}
+function destacar(t){
+  return escapar(t).replace(/\[[A-Z_]+_[0-9a-f]+[a-z]?\]/g, m => `<mark>${m}</mark>`);
+}
+function baixar(nome, conteudo, tipo){
+  const url = URL.createObjectURL(new Blob([conteudo], {type: tipo}));
+  const a = Object.assign(document.createElement("a"), {href:url, download:nome});
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// ---- estado inicial -------------------------------------------------------
+api("/api/estado").then(estado => {
+  $("#formatos").textContent = "formatos aceitos: " + estado.formatos.join(", ");
+  $("#perfis").innerHTML = estado.perfis.map(p => `
+    <div class="perfil ${p.chave===perfilAtivo?"ativo":""}" data-chave="${p.chave}">
+      <b>${p.nome}</b><span>${p.descricao}<br><i>${p.quando_usar}</i>
+      ${p.tipos_preservados.length ? "<br>preserva: " + p.tipos_preservados.join(", ") : ""}
+      </span></div>`).join("");
+  document.querySelectorAll(".perfil").forEach(el => el.onclick = () => {
+    perfilAtivo = el.dataset.chave;
+    document.querySelectorAll(".perfil").forEach(o => o.classList.remove("ativo"));
+    el.classList.add("ativo");
+  });
+  if(estado.llm.disponivel){
+    $("#estado-llm").textContent = "Claude disponível";
+    $("#llm").checked = estado.llm.padrao;
+  } else {
+    $("#llm").disabled = true;
+    $("#estado-llm").textContent = "indisponível: " + estado.llm.motivo;
+  }
+});
+
+// ---- arquivos -------------------------------------------------------------
+const zona = $("#zona");
+zona.onclick = () => $("#arquivo").click();
+zona.ondragover = e => { e.preventDefault(); zona.classList.add("sobre"); };
+zona.ondragleave = () => zona.classList.remove("sobre");
+zona.ondrop = e => {
+  e.preventDefault(); zona.classList.remove("sobre");
+  receber([...e.dataTransfer.files]);
+};
+$("#arquivo").onchange = e => receber([...e.target.files]);
+
+function receber(lista){
+  lista.forEach(f => arquivos.push(f));
+  desenharArquivos();
+}
+function desenharArquivos(){
+  $("#lista").innerHTML = arquivos.map((f,i) =>
+    `<li><span>${escapar(f.name)} <span class="estado">(${(f.size/1024).toFixed(0)} kB)</span></span>
+     <button data-i="${i}" title="remover">×</button></li>`).join("");
+  document.querySelectorAll("#lista button").forEach(b => b.onclick = () => {
+    arquivos.splice(+b.dataset.i, 1); desenharArquivos();
+  });
+}
+function lerBase64(arquivo){
+  return new Promise((ok, falha) => {
+    const leitor = new FileReader();
+    leitor.onload = () => ok(leitor.result.split(",")[1]);
+    leitor.onerror = falha;
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+// ---- envio ----------------------------------------------------------------
+async function enviar(rota){
+  $("#erro").textContent = "";
+  const texto = $("#texto").value.trim();
+  if(!arquivos.length && !texto){ $("#erro").textContent = "Envie um arquivo ou cole um texto."; return; }
+
+  const botoes = document.querySelectorAll("#anonimizar,#auditar");
+  botoes.forEach(b => b.disabled = true);
+  $("#resultados").innerHTML = `<div class="cartao estado">processando…</div>`;
+  try{
+    const corpo = {
+      perfil: perfilAtivo, usar_llm: $("#llm").checked, sessao,
+      texto, arquivos: []
+    };
+    for(const f of arquivos){
+      corpo.arquivos.push({nome: f.name, conteudo: await lerBase64(f)});
+    }
+    const dados = await api(rota, corpo);
+    if(dados.sessao){
+      sessao = dados.sessao;
+      $("#painel-sessao").classList.remove("oculto");
+      $("#resumo-sessao").textContent =
+        `${dados.sessao} — ${dados.itens_no_cofre} entrada(s) no cofre`;
+    }
+    desenhar(dados, rota === "/api/anonimizar");
+  }catch(e){
+    $("#resultados").innerHTML = "";
+    $("#erro").textContent = e.message;
+  }finally{
+    botoes.forEach(b => b.disabled = false);
+  }
+}
+$("#anonimizar").onclick = () => enviar("/api/anonimizar");
+$("#auditar").onclick = () => enviar("/api/auditar");
+
+// ---- resultados -----------------------------------------------------------
+function desenhar(dados, comTexto){
+  $("#resultados").innerHTML = dados.documentos.map((d, i) => {
+    if(d.erro) return `<div class="cartao doc"><h3>${escapar(d.nome)}
+      <span class="selo mau">falhou</span></h3><p class="estado">${escapar(d.erro)}</p></div>`;
+
+    const parecer = d.relatorio.parecer;
+    const anon = d.relatorio.anonimizacao;
+    const selo = d.aprovado ? `<span class="selo ok">aprovado</span>`
+                            : `<span class="selo mau">reprovado</span>`;
+    const tipos = anon ? Object.entries(anon.total_por_tipo)
+      .map(([t,n]) => `<tr><td>${t}</td><td>${n}</td></tr>`).join("") : "";
+    const achados = parecer.achados.map(a =>
+      `<div class="achado ${a.gravidade}"><b>${a.gravidade.toUpperCase()}</b>
+       · ${a.categoria} · ${a.tipo} ${a.trecho ? "· <code>"+escapar(a.trecho)+"</code>" : ""}
+       <br>${escapar(a.descricao)}</div>`).join("") || `<p class="estado">nenhum achado</p>`;
+    const verificacoes = Object.entries(parecer.verificacoes || {})
+      .map(([k,v]) => `<tr><td>${k}</td><td>${escapar(v)}</td></tr>`).join("");
+
+    return `<div class="cartao doc">
+      <div class="barra">
+        <h3>${escapar(d.nome)} ${selo}
+          <span class="selo neutro">risco ${d.nota_risco}/100</span></h3>
+        ${comTexto ? `<div class="linha" style="margin:0">
+          <button class="secundario" data-baixar="${i}">Baixar .txt</button>
+          <button class="secundario" data-relatorio="${i}">Baixar relatório</button>
+        </div>` : ""}
+      </div>
+      ${comTexto ? `<pre id="texto-${i}">${destacar(d.texto_anonimizado)}</pre>` : ""}
+      <table>
+        <tr><th>verificação</th><th>resultado</th></tr>${verificacoes}
+      </table>
+      ${tipos ? `<table><tr><th>entidade</th><th>ocorrências</th></tr>${tipos}</table>` : ""}
+      <h2 style="margin-top:16px">Achados do auditor</h2>
+      ${achados}
+      ${(parecer.recomendacoes||[]).map(r => `<p class="aviso">▸ ${escapar(r)}</p>`).join("")}
+    </div>`;
+  }).join("");
+
+  document.querySelectorAll("[data-baixar]").forEach(b => b.onclick = () => {
+    const d = dados.documentos[+b.dataset.baixar];
+    baixar(d.nome.replace(/\.[^.]+$/,"") + "_anonimizado.txt",
+           d.texto_anonimizado, "text/plain");
+  });
+  document.querySelectorAll("[data-relatorio]").forEach(b => b.onclick = () => {
+    const d = dados.documentos[+b.dataset.relatorio];
+    baixar(d.nome.replace(/\.[^.]+$/,"") + "_relatorio.json",
+           JSON.stringify(d.relatorio, null, 2), "application/json");
+  });
+}
+
+// ---- sessão ---------------------------------------------------------------
+$("#baixar-cofre").onclick = () =>
+  window.location = "/api/cofre?sessao=" + encodeURIComponent(sessao);
+
+$("#reidentificar").onclick = async () => {
+  const texto = prompt("Cole o texto anonimizado para reidentificar:");
+  if(!texto) return;
+  const dados = await api("/api/reidentificar", {sessao, texto});
+  baixar("reidentificado.txt", dados.texto, "text/plain");
+  alert(dados.aviso);
+};
+
+$("#encerrar").onclick = async () => {
+  if(!confirm("Apagar o cofre desta sessão? Os textos já anonimizados ficam irreversíveis.")) return;
+  await api("/api/encerrar", {sessao});
+  sessao = null;
+  $("#painel-sessao").classList.add("oculto");
+};
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import re
 import json
 import os
 import secrets
@@ -27,11 +28,25 @@ VARIAVEL_CHAVE = "ANONIMIZADOR_CHAVE"
 
 @dataclass
 class Entrada:
+    """Uma grafia exata de um dado, com o pseudônimo que a representa.
+
+    "SÃO PAULO" e "São Paulo" são a mesma entidade (mesmo `digest`, mesmo
+    `token_base`) mas grafias diferentes, e ganham tokens distintos —
+    `[LOCAL_002]` e `[LOCAL_002b]`. É o que permite reidentificar o documento
+    letra por letra sem perder a noção de que as duas apontam para o mesmo
+    lugar.
+    """
+
     token: str
     tipo: str
     valor: str
     digest: str
+    token_base: str = ""
     ocorrencias: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.token_base:
+            self.token_base = self.token
 
 
 @dataclass
@@ -45,8 +60,10 @@ class Cofre:
 
     estilo: str = "sequencial"
     chave_secreta: bytes = field(default_factory=lambda: _chave_do_ambiente())
-    _por_digest: Dict[str, Entrada] = field(default_factory=dict)
     _por_token: Dict[str, Entrada] = field(default_factory=dict)
+    _por_grafia: Dict[tuple, Entrada] = field(default_factory=dict)
+    _base_por_digest: Dict[str, str] = field(default_factory=dict)
+    _variantes: Dict[str, int] = field(default_factory=dict)
     _contador: Dict[str, int] = field(default_factory=dict)
 
     # -- identidade ---------------------------------------------------------
@@ -73,19 +90,37 @@ class Cofre:
     def token_para(self, tipo: str, valor: str) -> str:
         """Devolve (criando se preciso) o pseudônimo estável deste valor."""
         dig = self.digest(tipo, valor)
-        entrada = self._por_digest.get(dig)
+        entrada = self._por_grafia.get((dig, valor))
         if entrada is None:
-            prefixo = T.PREFIXO_TOKEN.get(tipo, tipo)
-            if self.estilo == "hash":
-                token = f"[{prefixo}_{dig[:6]}]"
+            base = self._base_por_digest.get(dig)
+            if base is None:
+                prefixo = T.PREFIXO_TOKEN.get(tipo, tipo)
+                if self.estilo == "hash":
+                    base = f"[{prefixo}_{dig[:6]}]"
+                else:
+                    self._contador[tipo] = self._contador.get(tipo, 0) + 1
+                    base = f"[{prefixo}_{self._contador[tipo]:03d}]"
+                self._base_por_digest[dig] = base
+                token = base
             else:
-                self._contador[tipo] = self._contador.get(tipo, 0) + 1
-                token = f"[{prefixo}_{self._contador[tipo]:03d}]"
-            entrada = Entrada(token=token, tipo=tipo, valor=valor, digest=dig)
-            self._por_digest[dig] = entrada
+                # grafia nova do mesmo dado: sufixo b, c, d…
+                self._variantes[base] = self._variantes.get(base, 0) + 1
+                token = f"{base[:-1]}{chr(ord('a') + self._variantes[base])}]"
+            entrada = Entrada(token=token, tipo=tipo, valor=valor, digest=dig,
+                              token_base=base)
+            self._por_grafia[(dig, valor)] = entrada
             self._por_token[token] = entrada
         entrada.ocorrencias += 1
         return entrada.token
+
+    @staticmethod
+    def base_de(token: str) -> str:
+        """`[LOCAL_002b]` -> `[LOCAL_002]`: o identificador da entidade, sem a
+        marca de variação de grafia. Use ao cruzar documentos."""
+        return re.sub(r"([0-9])[a-z]\]$", r"\1]", token)
+
+    def mesma_entidade(self, um: str, outro: str) -> bool:
+        return self.base_de(um) == self.base_de(outro)
 
     def valor_de(self, token: str) -> Optional[str]:
         entrada = self._por_token.get(token)
@@ -116,9 +151,11 @@ class Cofre:
             "estilo": self.estilo,
             "chave_secreta": base64.b64encode(self.chave_secreta).decode(),
             "contador": self._contador,
+            "variantes": self._variantes,
             "entradas": [
                 {"token": e.token, "tipo": e.tipo, "valor": e.valor,
-                 "digest": e.digest, "ocorrencias": e.ocorrencias}
+                 "digest": e.digest, "token_base": e.token_base,
+                 "ocorrencias": e.ocorrencias}
                 for e in self._por_token.values()
             ],
         }
@@ -132,10 +169,12 @@ class Cofre:
             chave_secreta=base64.b64decode(payload["chave_secreta"]),
         )
         cofre._contador = {k: int(v) for k, v in payload.get("contador", {}).items()}
+        cofre._variantes = {k: int(v) for k, v in payload.get("variantes", {}).items()}
         for item in payload.get("entradas", []):
             entrada = Entrada(**item)
-            cofre._por_digest[entrada.digest] = entrada
             cofre._por_token[entrada.token] = entrada
+            cofre._por_grafia[(entrada.digest, entrada.valor)] = entrada
+            cofre._base_por_digest.setdefault(entrada.digest, entrada.token_base)
         return cofre
 
     def salvar(self, caminho: os.PathLike | str, senha: Optional[str] = None) -> Path:

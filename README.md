@@ -9,6 +9,10 @@ Roda sem instalar nada (só a biblioteca padrão do Python 3.10+). A camada com
 Claude é opcional e entra por cima.
 
 ```bash
+# interface web local: arrasta os arquivos e pronto
+python -m anonimizador_juridico servir        # http://127.0.0.1:8765
+
+# ou pela linha de comando
 python -m anonimizador_juridico anonimizar \
     -e exemplos/peticao_exemplo.txt \
     -s peca_anonimizada.txt \
@@ -106,6 +110,56 @@ camadas são complementares, e a ordem importa.
 
 ---
 
+## Interface web
+
+```bash
+python -m anonimizador_juridico servir
+```
+
+Abre em `http://127.0.0.1:8765`: arraste `.txt`, `.docx`, `.html` ou `.pdf`
+(ou cole o texto), escolha o perfil, clique. Sai o texto anonimizado com os
+marcadores destacados, o parecer do auditor achado por achado, e os botões de
+baixar o `.txt` limpo e o relatório `.json`.
+
+Não é um site: é um servidor que roda **na máquina do escritório**, escrito só
+com a biblioteca padrão — sem framework, sem banco, sem Docker. Três decisões
+de segurança que valem por documentação:
+
+* escuta apenas em `127.0.0.1` por padrão — a máquina só fala com ela mesma, e
+  a peça judicial não atravessa a rede;
+* o **cofre vive só na memória** do processo: fechar o servidor apaga a
+  possibilidade de reidentificar. Quem precisa guardar, baixa o arquivo com
+  consciência do que está guardando;
+* o servidor não grava o documento original em disco em momento algum.
+
+Para colocar na rede interna: `--host 0.0.0.0 --token <segredo>` e, de
+preferência, um proxy com TLS na frente.
+
+**Documentos em lote compartilham o mesmo cofre**: envie a inicial, a
+contestação e a réplica juntas e a mesma pessoa recebe `[NOME_001]` nas três.
+É o que torna o conjunto utilizável por uma IA que precisa acompanhar quem é
+quem ao longo do processo.
+
+---
+
+## Perfis prontos
+
+Cada uso pede um ajuste diferente, então o sistema traz quatro configurações
+nomeadas — na interface, só o nome aparece:
+
+| Perfil | O que faz | Quando usar |
+|---|---|---|
+| **Padrão** | remove todo dado pessoal, preserva conteúdo jurídico, valores e datas processuais | enviar a peça para uma IA analisar ou resumir |
+| **Estrito (LGPD máxima)** | limiar mais baixo nos dois agentes, mais rodadas de correção | dado que sai da sua infraestrutura |
+| **Pesquisa de jurisprudência** | preserva número do processo, comarca, razão social e OAB; remove as pessoas físicas | índice interno de decisões, banco de teses |
+| **Base para treinar/indexar IA** | remove tudo, com pseudônimo em hash estável entre documentos | corpus, fine-tuning, RAG sobre acervo próprio |
+
+O perfil configura **os dois agentes**: o que ele manda preservar não vira
+achado do auditor — aparece no parecer como "preservado por decisão do perfil",
+para a escolha ficar registrada em vez de virar risco silencioso.
+
+---
+
 ## Uso
 
 ### Linha de comando
@@ -113,7 +167,8 @@ camadas são complementares, e a ordem importa.
 ```bash
 # anonimizar + auditar (sai 0 se aprovado, 2 se reprovado — dá para usar em CI)
 python -m anonimizador_juridico anonimizar -e peca.txt -s peca_anon.txt \
-    -c cofre.json -r relatorio.json --referencia "0001234-02.2023.5.02.0011"
+    -c cofre.json -r relatorio.json --perfil estrito \
+    --referencia "0001234-02.2023.5.02.0011"
 
 # com a camada semântica (exige `pip install anthropic` + ANTHROPIC_API_KEY)
 python -m anonimizador_juridico anonimizar -e peca.txt -s peca_anon.txt --com-llm
@@ -128,9 +183,10 @@ python -m anonimizador_juridico auditar -e peca_anon.txt --original peca.txt -c 
 python -m anonimizador_juridico reidentificar -e peca_anon.txt -c cofre.json
 ```
 
-Opções úteis: `--tipos-ignorados NOME_EMPRESA,LOCALIDADE` (preserva o que você
-não quer mascarar), `--estilo hash` (pseudônimo estável entre documentos),
-`--senha` (cofre cifrado), `--rodadas N`.
+Aceita `.txt`, `.docx`, `.html` e `.pdf` (este último com `pip install pypdf`;
+PDF digitalizado precisa de OCR antes, e o sistema avisa em vez de fingir que
+leu). Outras opções: `--perfil`, `--tipos-ignorados NOME_EMPRESA,LOCALIDADE`,
+`--estilo hash`, `--senha` (cofre cifrado), `--rodadas N`.
 
 ### Em Python
 
@@ -179,6 +235,12 @@ Cada dado vira um marcador estável: `[NOME_001]`, `[CPF_002]`. Isso preserva o
 que faz a peça ser útil para a IA — se `[NOME_001]` aparece em oito parágrafos,
 o modelo continua entendendo que é a mesma pessoa; uma tarja preta destruiria
 essa relação.
+
+Quando a mesma pessoa aparece escrita de dois jeitos ("SÃO PAULO" e
+"São Paulo", CPF com e sem pontuação), o sistema gera `[LOCAL_002]` e
+`[LOCAL_002b]`: tokens distintos, para o caminho de volta ser exato letra por
+letra, com a mesma base, para o cruzamento continuar enxergando uma entidade
+só (`Cofre.base_de` e `Cofre.mesma_entidade`).
 
 O **cofre** guarda o mapa `pseudônimo → valor real`. Ele é a diferença entre
 anonimização (irreversível) e pseudonimização (reversível pelo controlador —
@@ -243,11 +305,16 @@ anonimizador_juridico/
 ├── validadores.py           # CPF, CNPJ, PIS, CNH, título, processo CNJ, Luhn
 ├── detectores.py            # regex + heurística de nomes + localidades
 ├── cofre.py                 # pseudônimos estáveis, persistência, cifragem
+├── extratores.py            # .txt, .docx (sem dependência), .html, .pdf
 ├── llm.py                   # cliente Claude (opcional) + contratos JSON
 ├── agente_anonimizador.py   # AGENTE 1
 ├── agente_auditor.py        # AGENTE 2
 ├── orquestrador.py          # o sistema: laço anonimizar → auditar → corrigir
-└── cli.py                   # interface de linha de comando
+├── perfis.py                # configurações prontas por tipo de uso
+├── cli.py                   # linha de comando
+└── web/                     # interface local (http.server + uma página)
+    ├── servidor.py
+    └── static/index.html
 ```
 
 ## Testes
@@ -256,9 +323,11 @@ anonimizador_juridico/
 python -m unittest discover -s tests -t .
 ```
 
-58 testes, todos offline — a camada de LLM é exercitada com um dublê, inclusive
+85 testes, todos offline — a camada de LLM é exercitada com um dublê, inclusive
 os casos em que o modelo **alucina um trecho que não existe no documento** (o
-sistema descarta) e em que a credencial está ausente (o sistema avisa e segue).
+sistema descarta) e em que a credencial está ausente. A interface web é testada
+de verdade: sobe um servidor em porta efêmera e exercita upload, lote com cofre
+compartilhado, reidentificação, token de acesso e arquivo em formato inválido.
 
 ## Como estender
 

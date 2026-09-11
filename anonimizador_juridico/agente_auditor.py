@@ -23,13 +23,13 @@ Cinco verificações:
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 from . import detectores, tipos as T
 from .cofre import Cofre
 from .llm import SCHEMA_AUDITORIA, ClienteClaude
 
-RE_TOKEN = re.compile(r"\[[A-Z_]+_[0-9a-f]{3,}\]")
+RE_TOKEN = re.compile(r"\[[A-Z_]+_[0-9a-f]{3,}[a-z]?\]")
 
 SISTEMA_AUDITOR = """\
 Você é o auditor independente de proteção de dados de um escritório de \
@@ -68,6 +68,7 @@ class AgenteAuditor:
     def __init__(
         self,
         confianca_minima: float = 0.45,
+        tipos_fora_de_escopo: Iterable[str] = (),
         usar_llm: bool = False,
         cliente: Optional[ClienteClaude] = None,
         fator_perda_aceitavel: float = 1.6,
@@ -76,6 +77,10 @@ class AgenteAuditor:
         # Limiar mais baixo que o do anonimizador: o auditor prefere apontar
         # um falso positivo a deixar passar um dado real.
         self.confianca_minima = confianca_minima
+        # Tipos que o perfil escolheu preservar (ex.: número do processo na
+        # busca de jurisprudência). Não viram achado — mas são contados e
+        # declarados no parecer, para a decisão ficar registrada.
+        self.tipos_fora_de_escopo = set(tipos_fora_de_escopo)
         self.usar_llm = usar_llm
         self.cliente = cliente
         # Quanto a mais que o detectado pode ser removido antes de
@@ -95,6 +100,7 @@ class AgenteAuditor:
         verificacoes = {}
         usou_llm = False
         recomendacoes: List[str] = []
+        self._fora_de_escopo = 0
 
         # 1. verificação cega
         residuais = self._residuais(texto_anonimizado)
@@ -152,6 +158,12 @@ class AgenteAuditor:
         else:
             verificacoes["semantica"] = "desativada"
 
+        if self.tipos_fora_de_escopo:
+            verificacoes["escopo"] = (
+                f"{self._fora_de_escopo} ocorrência(s) preservadas por decisão "
+                f"do perfil ({', '.join(sorted(self.tipos_fora_de_escopo))})"
+            )
+
         achados = self._deduplicar(achados)
         nota = self._nota_risco(achados)
         bloqueantes = [a for a in achados if a.gravidade in (T.CRITICA, T.ALTA)]
@@ -175,6 +187,9 @@ class AgenteAuditor:
         for oc in detectores.varrer(texto, confianca_minima=self.confianca_minima):
             if RE_TOKEN.fullmatch(oc.valor.strip()):
                 continue
+            if oc.tipo in self.tipos_fora_de_escopo:
+                self._fora_de_escopo += 1
+                continue
             achados.append(T.Achado(
                 categoria="residual",
                 tipo=oc.tipo,
@@ -194,7 +209,7 @@ class AgenteAuditor:
         continuar literalmente aqui."""
         achados = []
         for oc in detectores.varrer(original, confianca_minima=self.confianca_minima):
-            if len(oc.valor.strip()) < 3:
+            if len(oc.valor.strip()) < 3 or oc.tipo in self.tipos_fora_de_escopo:
                 continue
             if oc.valor in anonimizado:
                 achados.append(T.Achado(
@@ -249,10 +264,12 @@ class AgenteAuditor:
         # (b) excesso de anonimização, medido contra a própria detecção do
         # auditor no original — e não contra um percentual fixo do documento.
         perdido = len(original) - len(sem_tokens)
-        esperado = sum(
-            len(oc.valor) for oc in
+        no_original = [
+            oc for oc in
             detectores.varrer(original, confianca_minima=self.confianca_minima)
-        )
+            if oc.tipo not in self.tipos_fora_de_escopo
+        ]
+        esperado = sum(len(oc.valor) for oc in no_original)
         if perdido > esperado * self.fator_perda_aceitavel + 40:
             achados.append(T.Achado(
                 categoria="perda_de_conteudo",
@@ -266,14 +283,17 @@ class AgenteAuditor:
                 origem="regra",
             ))
 
-        if not tokens and original.strip():
+        # Só é defeito não ter substituído nada se havia algo a substituir:
+        # peça sem dado pessoal em escopo sai intacta e isso está correto.
+        if not tokens and no_original:
             achados.append(T.Achado(
                 categoria="sem_substituicao",
                 tipo="INTEGRIDADE",
                 gravidade=T.ALTA,
                 descricao=(
-                    "nenhum marcador de pseudônimo foi encontrado na saída: ou a "
-                    "peça não continha dado pessoal, ou a anonimização não rodou"
+                    f"o auditor encontrou {len(no_original)} dado(s) pessoal(is) "
+                    "no documento original, mas a saída não tem nenhum marcador: "
+                    "a anonimização não rodou"
                 ),
                 origem="regra",
             ))

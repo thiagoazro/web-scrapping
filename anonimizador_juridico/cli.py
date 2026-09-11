@@ -13,18 +13,24 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from . import perfis as _perfis
 from . import tipos as T
 from .agente_anonimizador import AgenteAnonimizador
 from .agente_auditor import AgenteAuditor
 from .cofre import Cofre
+from .extratores import extrair_texto
 from .llm import ClienteClaude
 from .orquestrador import VERSAO, Pipeline
 
 
 def _ler(caminho: str) -> str:
+    """Aceita .txt, .docx, .html e .pdf (com pypdf instalado), além de stdin."""
     if caminho == "-":
         return sys.stdin.read()
-    return Path(caminho).read_text(encoding="utf-8")
+    arquivo = Path(caminho)
+    if arquivo.suffix.lower() in (".txt", ".md", ".text", ""):
+        return arquivo.read_text(encoding="utf-8")
+    return extrair_texto(arquivo.name, arquivo.read_bytes())
 
 
 def _carregar_cofre(caminho: Optional[str], senha: Optional[str]) -> Optional[Cofre]:
@@ -49,24 +55,27 @@ def _imprimir_parecer(parecer: T.Parecer) -> None:
 
 def comando_anonimizar(args: argparse.Namespace) -> int:
     texto = _ler(args.entrada)
-    cofre = _carregar_cofre(args.cofre, args.senha) or Cofre(estilo=args.estilo)
+    perfil = _perfis.obter(args.perfil)
+    estilo = args.estilo if args.estilo != "perfil" else perfil.estilo_token
+    cofre = _carregar_cofre(args.cofre, args.senha) or Cofre(estilo=estilo)
 
+    cliente = None
     if args.com_llm:
         cliente = ClienteClaude(modelo=args.modelo, esforco=args.esforco)
         if not cliente.disponivel:
             print(f"[aviso] camada semântica indisponível: "
                   f"{cliente.erro_inicializacao}", file=sys.stderr)
-        anonimizador = AgenteAnonimizador(cofre=cofre, usar_llm=True, cliente=cliente)
-        auditor = AgenteAuditor(usar_llm=True, cliente=cliente)
-    else:
-        anonimizador = AgenteAnonimizador(cofre=cofre)
-        auditor = AgenteAuditor()
 
+    pipeline = perfil.construir(usar_llm=bool(args.com_llm), cofre=cofre,
+                                cliente=cliente)
     if args.tipos_ignorados:
-        anonimizador.tipos_ignorados = set(args.tipos_ignorados.split(","))
+        extras = set(args.tipos_ignorados.split(","))
+        pipeline.anonimizador.tipos_ignorados |= extras
+        pipeline.auditor.tipos_fora_de_escopo |= extras
+    if args.rodadas:
+        pipeline.rodadas_max = args.rodadas
 
-    pipeline = Pipeline(anonimizador=anonimizador, auditor=auditor,
-                        rodadas_max=args.rodadas)
+    print(f"[info] perfil: {perfil.nome}", file=sys.stderr)
     resultado = pipeline.processar(texto, referencia=args.referencia)
 
     if args.saida:
@@ -124,6 +133,14 @@ def comando_reidentificar(args: argparse.Namespace) -> int:
     return 0
 
 
+def comando_servir(args: argparse.Namespace) -> int:
+    from .web import servir
+
+    servir(host=args.host, porta=args.porta, token=args.token,
+           usar_llm=args.com_llm)
+    return 0
+
+
 def construir_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="anonimizador_juridico",
@@ -147,16 +164,19 @@ def construir_parser() -> argparse.ArgumentParser:
     comuns(p_anon)
     p_anon.add_argument("-s", "--saida", help="arquivo de saída (padrão: stdout)")
     p_anon.add_argument("-r", "--relatorio", help="arquivo JSON com o relatório completo")
-    p_anon.add_argument("--rodadas", type=int, default=3,
-                        help="máximo de rodadas anonimizar->auditar (padrão: 3)")
-    p_anon.add_argument("--estilo", default="sequencial",
-                        choices=["sequencial", "hash"],
+    p_anon.add_argument("--rodadas", type=int, default=0,
+                        help="máximo de rodadas anonimizar->auditar (0 = o do perfil)")
+    p_anon.add_argument("--estilo", default="perfil",
+                        choices=["perfil", "sequencial", "hash"],
                         help="formato do pseudônimo ([NOME_001] ou [NOME_3f9c1a])")
     p_anon.add_argument("--tipos-ignorados", default="",
                         help="tipos a NÃO anonimizar, separados por vírgula "
                              "(ex.: NOME_EMPRESA,PROCESSO_CNJ)")
     p_anon.add_argument("--referencia", default="",
                         help="identificação do caso para a trilha de auditoria")
+    p_anon.add_argument("--perfil", default="padrao",
+                        choices=sorted(_perfis.PERFIS),
+                        help="perfil de anonimização (ver README)")
     p_anon.set_defaults(func=comando_anonimizar)
 
     p_aud = sub.add_parser("auditar", help="audita um texto já anonimizado")
@@ -170,6 +190,15 @@ def construir_parser() -> argparse.ArgumentParser:
     comuns(p_rei)
     p_rei.add_argument("-s", "--saida")
     p_rei.set_defaults(func=comando_reidentificar)
+
+    p_web = sub.add_parser("servir", help="abre a interface web local")
+    p_web.add_argument("--host", default="127.0.0.1",
+                       help="padrão 127.0.0.1 (só esta máquina)")
+    p_web.add_argument("--porta", type=int, default=8765)
+    p_web.add_argument("--token", help="exige este token nas chamadas de API")
+    p_web.add_argument("--com-llm", action="store_true",
+                       help="deixa a camada semântica ligada por padrão")
+    p_web.set_defaults(func=comando_servir)
     return parser
 
 

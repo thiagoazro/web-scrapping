@@ -227,6 +227,23 @@ PALAVRAS_NAO_NOME = {
     "valor", "causa", "total", "geral", "unico", "primeira", "segunda",
 }
 
+# Palavras comuns que começam frase em português e, por estarem em maiúscula,
+# grudam no nome seguinte ("Conforme João Pedro Alves" viraria um nome só e,
+# pior, um nome diferente do mesmo João citado noutro parágrafo).
+PALAVRAS_INICIAIS_COMUNS = {
+    "conforme", "segundo", "depois", "quando", "ainda", "assim", "portanto",
+    "contudo", "entretanto", "todavia", "porem", "porque", "embora", "apesar",
+    "durante", "mediante", "sobre", "sob", "ante", "apos", "antes", "desde",
+    "entre", "para", "pelo", "pela", "como", "caso", "diante", "nesse",
+    "neste", "nesta", "nessa", "esse", "este", "esta", "essa", "aquele",
+    "aquela", "outro", "outra", "mesmo", "mesma", "tal", "tais", "cabe",
+    "trata", "cumpre", "resta", "inclusive", "tambem", "ademais", "outrossim",
+    "finalmente", "primeiramente", "ocorre", "note", "veja", "ressalte",
+    "importa", "verifica", "observa", "considerando", "tendo", "havendo",
+    "sendo", "dado", "dada", "posteriormente", "anteriormente", "logo",
+    "alem", "quanto", "quando", "onde", "sempre", "nunca", "jamais",
+}
+
 _PAL = r"[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ][a-záéíóúâêôãõàçü]+"
 _CON = r"(?:de|da|do|das|dos|del|di)"
 
@@ -257,6 +274,19 @@ def _candidato_e_institucional(valor: str) -> bool:
     return len(palavras) < 2
 
 
+def _aparar(valor: str, inicio: int) -> Tuple[str, int]:
+    """Remove do começo e do fim do candidato as palavras que não fazem parte
+    de nome nenhum, devolvendo o trecho e o novo deslocamento."""
+    palavras = valor.split()
+    descartaveis = PALAVRAS_INICIAIS_COMUNS | PALAVRAS_NAO_NOME
+    while palavras and T.normalizar(palavras[0]) in descartaveis:
+        inicio += len(palavras[0]) + 1
+        palavras.pop(0)
+    while palavras and T.normalizar(palavras[-1]) in (descartaveis | CONECTIVOS):
+        palavras.pop()
+    return " ".join(palavras), inicio
+
+
 def detectar_nomes(texto: str, confianca_minima: float = 0.5) -> List[T.Ocorrencia]:
     """Localiza nomes de pessoa por forma + contexto de papel processual."""
     achados: List[T.Ocorrencia] = []
@@ -264,7 +294,10 @@ def detectar_nomes(texto: str, confianca_minima: float = 0.5) -> List[T.Ocorrenc
 
     for regex, base in ((RE_NOME_CAIXA_ALTA, 0.62), (RE_NOME_TITULO, 0.55)):
         for m in regex.finditer(texto):
-            valor = m.group(0).strip()
+            valor, inicio = _aparar(m.group(0).strip(), m.start())
+            if len(valor.split()) < 2:
+                continue
+            fim = inicio + len(valor)
             if _candidato_e_institucional(valor):
                 continue
             chave = T.normalizar(valor)
@@ -272,7 +305,7 @@ def detectar_nomes(texto: str, confianca_minima: float = 0.5) -> List[T.Ocorrenc
                 # "São Paulo", "Santa Catarina": topônimo, não pessoa.
                 achados.append(T.Ocorrencia(
                     tipo=T.LOCALIDADE, valor=valor,
-                    inicio=m.start(), fim=m.end(), confianca=0.9,
+                    inicio=inicio, fim=fim, confianca=0.9,
                     origem="regra", motivo="município ou unidade federativa",
                 ))
                 continue
@@ -281,28 +314,28 @@ def detectar_nomes(texto: str, confianca_minima: float = 0.5) -> List[T.Ocorrenc
                 # "Banco do Brasil", "Construtora Horizonte": pessoa jurídica.
                 achados.append(T.Ocorrencia(
                     tipo=T.NOME_EMPRESA, valor=valor,
-                    inicio=m.start(), fim=m.end(), confianca=0.7,
+                    inicio=inicio, fim=fim, confianca=0.7,
                     origem="regra", motivo="razão social iniciada por termo institucional",
                 ))
                 continue
-            antes = texto[max(0, m.start() - 40): m.start()]
+            antes = texto[max(0, inicio - 40): inicio]
             confianca = base
             motivo = "forma de nome próprio"
             if MARCADORES_PAPEL.search(antes):
                 confianca = 0.93
                 motivo = "precedido de marcador de papel processual"
             elif re.search(r"\b(?:CPF|RG|inscrit[oa]|portador[a]?)\b",
-                           texto[m.end(): m.end() + 60], re.IGNORECASE):
+                           texto[fim: fim + 60], re.IGNORECASE):
                 confianca = 0.9
                 motivo = "seguido de documento de identificação"
             if confianca < confianca_minima:
                 continue
-            chave = (m.start(), m.end())
+            chave = (inicio, fim)
             if chave in vistos:
                 continue
             vistos.add(chave)
             achados.append(T.Ocorrencia(
-                tipo=T.NOME_PESSOA, valor=valor, inicio=m.start(), fim=m.end(),
+                tipo=T.NOME_PESSOA, valor=valor, inicio=inicio, fim=fim,
                 confianca=confianca, origem="regra", motivo=motivo,
             ))
     return achados
