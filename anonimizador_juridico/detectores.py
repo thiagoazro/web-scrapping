@@ -247,13 +247,17 @@ PALAVRAS_INICIAIS_COMUNS = {
 _PAL = r"[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ][a-záéíóúâêôãõàçü]+"
 _CON = r"(?:de|da|do|das|dos|del|di)"
 
+#: Separa palavras de um mesmo nome: espaços ou uma única quebra de linha
+#: (texto justificado quebra nome ao meio), mas nunca uma linha em branco.
+_SEP = r"(?:[ \t]+|\n(?![ \t]*\n))+"
+
 RE_NOME_TITULO = re.compile(
-    rf"\b{_PAL}(?:\s+(?:{_CON}\s+)?{_PAL}){{1,5}}\b"
+    rf"\b{_PAL}(?:{_SEP}(?:{_CON}{_SEP})?{_PAL}){{1,5}}\b"
 )
 RE_NOME_CAIXA_ALTA = re.compile(
-    r"\b[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ]{2,}(?:\s+(?:DE|DA|DO|DAS|DOS)\s+|\s+)"
-    r"[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ]{2,}(?:(?:\s+(?:DE|DA|DO|DAS|DOS))?\s+"
-    r"[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ]{2,}){0,4}\b"
+    rf"\b[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ]{{2,}}(?:{_SEP}(?:DE|DA|DO|DAS|DOS){_SEP}|{_SEP})"
+    rf"[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ]{{2,}}(?:(?:{_SEP}(?:DE|DA|DO|DAS|DOS))?{_SEP}"
+    rf"[A-ZÁÉÍÓÚÂÊÔÃÕÀÇ]{{2,}}){{0,4}}\b"
 )
 
 
@@ -274,17 +278,26 @@ def _candidato_e_institucional(valor: str) -> bool:
     return len(palavras) < 2
 
 
-def _aparar(valor: str, inicio: int) -> Tuple[str, int]:
-    """Remove do começo e do fim do candidato as palavras que não fazem parte
-    de nome nenhum, devolvendo o trecho e o novo deslocamento."""
-    palavras = valor.split()
+def _aparar(texto: str, inicio: int, fim: int) -> Tuple[str, int, int]:
+    """Descarta, nas pontas do candidato, as palavras que não fazem parte de
+    nome nenhum.
+
+    Trabalha com deslocamentos no texto original — e não recompondo a string —
+    porque o trecho pode conter quebra de linha no meio: recompor com espaço
+    encurtaria o intervalo e a substituição sairia deslocada.
+    """
     descartaveis = PALAVRAS_INICIAIS_COMUNS | PALAVRAS_NAO_NOME
-    while palavras and T.normalizar(palavras[0]) in descartaveis:
-        inicio += len(palavras[0]) + 1
+    palavras = [(m.group(0), m.start(), m.end())
+                for m in re.finditer(r"\S+", texto[inicio:fim])]
+    while palavras and T.normalizar(palavras[0][0]) in descartaveis:
         palavras.pop(0)
-    while palavras and T.normalizar(palavras[-1]) in (descartaveis | CONECTIVOS):
+    while palavras and T.normalizar(palavras[-1][0]) in (descartaveis | CONECTIVOS):
         palavras.pop()
-    return " ".join(palavras), inicio
+    if len(palavras) < 2:
+        return "", inicio, inicio
+    novo_inicio = inicio + palavras[0][1]
+    novo_fim = inicio + palavras[-1][2]
+    return texto[novo_inicio:novo_fim], novo_inicio, novo_fim
 
 
 def detectar_nomes(texto: str, confianca_minima: float = 0.5) -> List[T.Ocorrencia]:
@@ -294,10 +307,9 @@ def detectar_nomes(texto: str, confianca_minima: float = 0.5) -> List[T.Ocorrenc
 
     for regex, base in ((RE_NOME_CAIXA_ALTA, 0.62), (RE_NOME_TITULO, 0.55)):
         for m in regex.finditer(texto):
-            valor, inicio = _aparar(m.group(0).strip(), m.start())
-            if len(valor.split()) < 2:
+            valor, inicio, fim = _aparar(texto, m.start(), m.end())
+            if not valor:
                 continue
-            fim = inicio + len(valor)
             if _candidato_e_institucional(valor):
                 continue
             chave = T.normalizar(valor)

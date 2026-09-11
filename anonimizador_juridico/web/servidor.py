@@ -112,6 +112,19 @@ class Manipulador(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(corpo)
 
+    def _cabecalhos_de_seguranca(self) -> None:
+        # A página é autossuficiente: nada externo entra, nada sai para fora
+        # da origem. Se um documento trouxer HTML ou script, a política impede
+        # que ele chame qualquer endereço de terceiro.
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "connect-src 'self'; form-action 'none'; frame-ancestors 'none'; "
+            "base-uri 'none'")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def _erro(self, mensagem: str, status: int = HTTPStatus.BAD_REQUEST) -> None:
         self._responder({"erro": mensagem}, status)
 
@@ -182,6 +195,7 @@ class Manipulador(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(corpo)))
+        self._cabecalhos_de_seguranca()
         self.end_headers()
         self.wfile.write(corpo)
 

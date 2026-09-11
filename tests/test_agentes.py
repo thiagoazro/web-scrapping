@@ -1,6 +1,7 @@
+import json
 import unittest
 
-from anonimizador_juridico import tipos as T
+from anonimizador_juridico import defesas, tipos as T
 from anonimizador_juridico.agente_anonimizador import AgenteAnonimizador
 from anonimizador_juridico.agente_auditor import AgenteAuditor
 from anonimizador_juridico.cofre import Cofre
@@ -15,17 +16,36 @@ do art. 71 da CLT. Contato: maria@exemplo.com, telefone (11) 98765-4321.
 
 
 class ClienteFalso:
-    """Dublê do Claude: responde o que o teste mandar, sem rede."""
+    """Dublê do Claude: responde o que o teste mandar, sem rede.
 
-    def __init__(self, resposta):
+    Por padrão devolve o canário que veio no prompt — é o que um modelo
+    íntegro faria. `subvertido=True` simula o modelo que obedeceu a uma
+    instrução escondida no documento e não devolveu a entidade de controle.
+    """
+
+    def __init__(self, resposta, subvertido=False):
         self.resposta = resposta
+        self.subvertido = subvertido
         self.chamadas = []
         self.disponivel = True
         self.erro_inicializacao = None
 
     def extrair_json(self, sistema, conteudo, schema, max_tokens=None):
         self.chamadas.append(conteudo)
-        return self.resposta
+        resposta = json.loads(json.dumps(self.resposta))  # cópia
+        if self.subvertido:
+            return resposta
+        marca = defesas.RE_CANARIO.search(conteudo)
+        if marca:
+            if "entidades" in resposta:
+                resposta["entidades"].append({
+                    "trecho": marca.group(0), "tipo": "NOME_PESSOA",
+                    "confianca": 0.95, "motivo": "testemunha"})
+            if "achados" in resposta:
+                resposta["achados"].append({
+                    "trecho": marca.group(0), "tipo": "EMAIL",
+                    "gravidade": "alta", "descricao": "e-mail remanescente"})
+        return resposta
 
 
 class TestAgenteAnonimizador(unittest.TestCase):

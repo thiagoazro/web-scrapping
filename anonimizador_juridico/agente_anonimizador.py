@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from . import detectores, tipos as T
+from . import defesas, detectores, tipos as T
 from .cofre import Cofre
 from .llm import SCHEMA_DETECCAO, ClienteClaude
 
@@ -182,12 +182,31 @@ class AgenteAnonimizador:
                 f"de {self.max_caracteres_llm}; divida a peça em blocos"
             )
 
+        # A peça vem de terceiros: higieniza antes de colocar no prompt e leva
+        # junto um canário que o modelo é obrigado a devolver.
+        seguro = defesas.higienizar(mascarado)
+        canario = defesas.Canario("anonimizador")
+
         dados = cliente.extrair_json(
-            sistema=SISTEMA_ANONIMIZADOR.format(tipos=", ".join(T.TIPOS)),
-            conteudo=f"<peca>\n{mascarado}\n</peca>",
+            sistema=(SISTEMA_ANONIMIZADOR.format(tipos=", ".join(T.TIPOS))
+                     + "\n\n" + defesas.AVISO_INJECAO),
+            conteudo=f"<peca>\n{seguro}{canario.texto}\n</peca>",
             schema=SCHEMA_DETECCAO,
         )
-        return self._converter(original, dados.get("entidades", []))
+
+        entidades = dados.get("entidades", [])
+        if not canario.encontrado(e.get("trecho", "") for e in entidades):
+            # Falha fechada: ou o modelo errou, ou alguém o convenceu a não
+            # devolver nada. Nos dois casos a resposta inteira é lixo.
+            raise RuntimeError(
+                "verificação do canário falhou: o modelo não devolveu a "
+                "entidade de controle, então a resposta semântica foi "
+                "descartada por inteiro (possível injeção de prompt no "
+                "documento ou falha do modelo)"
+            )
+
+        uteis = [e for e in entidades if not canario.e_do_canario(e.get("trecho", ""))]
+        return self._converter(original, uteis)
 
     def _converter(self, original: str, entidades: Sequence[dict]) -> List[T.Ocorrencia]:
         """Converte a saída do modelo em ocorrências — descartando qualquer

@@ -79,6 +79,28 @@ class TestDeteccaoDeNomes(unittest.TestCase):
         self.assertEqual(len(nomes), 2)
 
 
+class TestRecorteDeNomes(unittest.TestCase):
+    def test_nome_nao_atravessa_paragrafo(self):
+        texto = "VARA DO TRABALHO\n\nMARIA APARECIDA DOS SANTOS, brasileira"
+        nomes = valores_de(texto, T.NOME_PESSOA)
+        self.assertEqual(nomes, ["MARIA APARECIDA DOS SANTOS"])
+
+    def test_nome_quebrado_pela_margem_continua_inteiro(self):
+        # texto justificado quebra o nome em duas linhas
+        nomes = valores_de("Assinado por Dr. Carlos Eduardo\nPereira, OAB/SP 123.456",
+                           T.NOME_PESSOA)
+        self.assertEqual(nomes, ["Carlos Eduardo\nPereira"])
+
+    def test_intervalo_bate_com_o_texto(self):
+        """O trecho apontado precisa ser exatamente o que está no documento:
+        errar um caractere no fim deixa a última letra do nome para trás."""
+        texto = ("VARA DO TRABALHO\n\nMARIA APARECIDA DOS SANTOS, brasileira, "
+                 "residente em Santos")
+        for ocorrencia in detectores.varrer(texto):
+            self.assertEqual(texto[ocorrencia.inicio:ocorrencia.fim],
+                             ocorrencia.valor)
+
+
 class TestResolucaoDeSobreposicao(unittest.TestCase):
     def test_trecho_mais_especifico_vence(self):
         ocorrencias = detectores.varrer("PIS 12012345672 do autor")

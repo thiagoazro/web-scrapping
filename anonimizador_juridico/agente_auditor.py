@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from typing import Iterable, List, Optional, Sequence
 
-from . import detectores, tipos as T
+from . import defesas, detectores, tipos as T
 from .cofre import Cofre
 from .llm import SCHEMA_AUDITORIA, ClienteClaude
 
@@ -120,7 +120,13 @@ class AgenteAuditor:
             verificacoes["confronto"] = "não executada (texto original não fornecido)"
             verificacoes["integridade"] = "não executada (texto original não fornecido)"
 
-        # 3. cofre
+        # 3. segurança do próprio documento (roda sempre, com ou sem LLM)
+        seguranca = defesas.detectar(texto_original if texto_original is not None
+                                     else texto_anonimizado)
+        achados.extend(seguranca)
+        verificacoes["injecao"] = f"{len(seguranca)} achado(s)"
+
+        # 4. cofre
         if cofre is not None:
             cofre_achados = self._checar_cofre(texto_anonimizado, cofre)
             achados.extend(cofre_achados)
@@ -128,7 +134,7 @@ class AgenteAuditor:
         else:
             verificacoes["cofre"] = "não executada (cofre não fornecido)"
 
-        # 4. camada semântica
+        # 5. camada semântica
         if self.usar_llm:
             try:
                 semanticos, recomendacoes = self._auditar_com_llm(texto_anonimizado)
@@ -346,14 +352,32 @@ class AgenteAuditor:
                 f"{self.max_caracteres_llm}; audite a peça em blocos"
             )
 
+        seguro = defesas.higienizar(anonimizado)
+        canario = defesas.Canario("auditor")
+        enviado = f"{seguro}{canario.texto}"
+
         dados = cliente.extrair_json(
-            sistema=SISTEMA_AUDITOR,
-            conteudo=f"<peca_anonimizada>\n{anonimizado}\n</peca_anonimizada>",
+            sistema=SISTEMA_AUDITOR + "\n\n" + defesas.AVISO_INJECAO,
+            conteudo=f"<peca>\n{enviado}\n</peca>",
             schema=SCHEMA_AUDITORIA,
         )
+
+        itens = dados.get("achados", [])
+        if not canario.encontrado(i.get("trecho", "") for i in itens):
+            # O auditor precisa encontrar o dado plantado. Não encontrou:
+            # o parecer semântico não vale nada e é descartado.
+            raise RuntimeError(
+                "verificação do canário falhou: o auditor não apontou a "
+                "entidade de controle plantada no texto, então o parecer "
+                "semântico foi descartado (possível injeção de prompt no "
+                "documento ou falha do modelo)"
+            )
+
         achados = []
-        for item in dados.get("achados", []):
+        for item in itens:
             trecho = (item.get("trecho") or "").strip()
+            if canario.e_do_canario(trecho):
+                continue
             # Anti-alucinação: o trecho precisa existir mesmo no documento.
             if trecho and trecho not in anonimizado:
                 continue
