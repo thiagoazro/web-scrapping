@@ -124,7 +124,7 @@ class AgenteAuditor:
         # original e também a saída: é a saída que segue para o próximo
         # sistema, e o texto de injeção sobrevive à anonimização — ele não é
         # dado pessoal, então nada o remove.
-        seguranca = self._deduplicar(
+        seguranca = self._por_tipo(
             defesas.detectar(texto_anonimizado)
             + (defesas.detectar(texto_original) if texto_original else [])
         )
@@ -401,6 +401,22 @@ class AgenteAuditor:
         return achados, list(dados.get("recomendacoes", []))
 
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _por_tipo(achados: Sequence[T.Achado]) -> List[T.Achado]:
+        """Um alerta por tipo de padrão.
+
+        O mesmo texto de injeção é encontrado no original e na saída, com
+        janelas de contexto diferentes — o alerta é sobre o padrão, não sobre
+        cada aparição, e repetir só polui a tela de quem revisa.
+        """
+        vistos, saida = set(), []
+        for achado in achados:
+            if achado.tipo in vistos:
+                continue
+            vistos.add(achado.tipo)
+            saida.append(achado)
+        return saida
 
     @staticmethod
     def _deduplicar(achados: Sequence[T.Achado]) -> List[T.Achado]:
